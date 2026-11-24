@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Laptop Webcam Radar</title>
+  <style>
+    body {
+      background: #051108;
+      color: #39ff14;
+      font-family: Arial, sans-serif;
+      text-align: center;
+      margin: 0;
+      padding: 15px;
+    }
+    canvas {
+      background: radial-gradient(circle, #0d2b14 0%, #051108 100%);
+      border: 3px solid #39ff14;
+      border-radius: 50%;
+      box-shadow: 0 0 25px rgba(57, 255, 20, 0.35);
+    }
+    #status { font-size: 16px; margin-bottom: 10px; }
+  </style>
+</head>
+<body>
+  <h2>LIVE WEBCAM OBJECT RADAR</h2>
+  <div id="status">Click "Allow" if asked for Camera permission. Move your hand in front of the laptop!</div>
+  <canvas id="radar" width="460" height="460"></canvas>
+  <video id="cam" width="160" height="120" autoplay playsinline style="display:none;"></video>
+  <canvas id="proc" width="80" height="60" style="display:none;"></canvas>
+
+  <script>
+    const radar = document.getElementById("radar");
+    const rCtx = radar.getContext("2d");
+    const video = document.getElementById("cam");
+    const proc = document.getElementById("proc");
+    const pCtx = proc.getContext("2d", { willReadFrequently: true });
+    const statusText = document.getElementById("status");
+
+    const cx = radar.width / 2;
+    const cy = radar.height / 2;
+    const maxR = cx - 15;
+    let angle = 0;
+    let prevFrame = null;
+    let blips = [];
+
+    // Start laptop webcam
+    navigator.mediaDevices.getUserMedia({ video: true })
+      .then(stream => {
+        video.srcObject = stream;
+        statusText.textContent = "RADAR ACTIVE — Wave your hand or an object in front of the camera!";
+      })
+      .catch(() => {
+        statusText.textContent = "Camera blocked! Please allow camera access in your browser.";
+      });
+
+    function detectMotion() {
+      if (video.readyState === video.HAVE_ENOUGH_DATA) {
+        pCtx.drawImage(video, 0, 0, proc.width, proc.height);
+        const frame = pCtx.getImageData(0, 0, proc.width, proc.height).data;
+
+        if (prevFrame) {
+          for (let y = 4; y < proc.height - 4; y += 4) {
+            for (let x = 4; x < proc.width - 4; x += 4) {
+              const i = (y * proc.width + x) * 4;
+              const diff = Math.abs(frame[i] - prevFrame[i]) +
+                           Math.abs(frame[i + 1] - prevFrame[i + 1]) +
+                           Math.abs(frame[i + 2] - prevFrame[i + 2]);
+
+              if (diff > 95) {
+                // Mirror X so moving hand left moves blip left
+                const normX = (proc.width - x) / proc.width;
+                const normY = y / proc.height;
+                const rx = cx + (normX - 0.5) * (maxR * 1.8);
+                const ry = cy + (normY - 0.5) * (maxR * 1.8);
+
+                if (Math.hypot(rx - cx, ry - cy) <= maxR) {
+                  blips.push({ x: rx, y: ry, alpha: 1.0 });
+                }
+              }
+            }
+          }
+        }
+        prevFrame = new Uint8ClampedArray(frame);
+      }
+    }
+
+    function draw() {
+      detectMotion();
+
+      rCtx.fillStyle = "rgba(5, 17, 8, 0.18)";
+      rCtx.fillRect(0, 0, radar.width, radar.height);
+
+      // Radar rings
+      rCtx.strokeStyle = "rgba(57, 255, 20, 0.35)";
+      rCtx.lineWidth = 1;
+      for (let r = maxR / 4; r <= maxR; r += maxR / 4) {
+        rCtx.beginPath();
+        rCtx.arc(cx, cy, r, 0, Math.PI * 2);
+        rCtx.stroke();
+      }
+
+      // Crosshairs
+      rCtx.beginPath();
+      rCtx.moveTo(cx - maxR, cy); rCtx.lineTo(cx + maxR, cy);
+      rCtx.moveTo(cx, cy - maxR); rCtx.lineTo(cx, cy + maxR);
+      rCtx.stroke();
+
+      // Sweeping green beam
+      const rad = (angle * Math.PI) / 180;
+      rCtx.strokeStyle = "#39ff14";
+      rCtx.lineWidth = 2.5;
+      rCtx.beginPath();
+      rCtx.moveTo(cx, cy);
+      rCtx.lineTo(cx + Math.cos(rad) * maxR, cy + Math.sin(rad) * maxR);
+      rCtx.stroke();
+
+      // Draw detected object blips
+      for (let i = blips.length - 1; i >= 0; i--) {
+        const b = blips[i];
+        rCtx.fillStyle = `rgba(255, 45, 45, ${b.alpha})`;
+        rCtx.beginPath();
+        rCtx.arc(b.x, b.y, 5, 0, Math.PI * 2);
+        rCtx.fill();
+        b.alpha -= 0.04;
+        if (b.alpha <= 0) blips.splice(i, 1);
+      }
+
+      angle = (angle + 3) % 360;
+      requestAnimationFrame(draw);
+    }
+
+    draw();
+  </script>
+</body>
+</html>
+
